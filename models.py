@@ -11,4 +11,3 @@ class User(db.Model):
     password_hash = db.Column(db.String(255), nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
-    searches = db.relationship("SearchHistory", backref="user", lazy=True)
