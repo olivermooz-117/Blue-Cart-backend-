@@ -25,3 +25,16 @@ def register():
 
     token = create_access_token(identity=str(user.id))
     return jsonify({"access_token": token, "email": user.email}), 201
+
+@auth_bp.route("/login", methods=["POST"])
+def login():
+    body = request.get_json(force=True) or {}
+    email = body.get("email", "").strip().lower()
+    password = body.get("password", "")
+
+    user = User.query.filter_by(email=email).first()
+    if not user or not bcrypt.check_password_hash(user.password_hash, password):
+        return jsonify({"error": "invalid email or password"}), 401
+
+    token = create_access_token(identity=str(user.id))
+    return jsonify({"access_token": token, "email": user.email})
