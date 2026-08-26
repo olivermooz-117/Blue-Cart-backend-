@@ -18,7 +18,6 @@ def create_app():
 
     app.register_blueprint(search_bp)
     app.register_blueprint(auth_bp)
-    app.register_blueprint(history_bp)
 
     @app.route("/api/health")
     def health():
