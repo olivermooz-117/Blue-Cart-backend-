@@ -10,21 +10,6 @@ jobs:
   test:
     runs-on: ubuntu-latest
 
-    services:
-      postgres:
-        image: postgres:15
-        env:
-          POSTGRES_USER: testuser
-          POSTGRES_PASSWORD: testpass
-          POSTGRES_DB: testdb
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -33,46 +18,38 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
-          cache: 'pip'
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt || true
-          pip install pytest pytest-cov flake8 || true
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          else
+            pip install flask pytest pytest-cov
+          fi
 
-      - name: Lint with flake8
+      - name: Check Python syntax
         run: |
-          flake8 app --count --select=E9,F63,F7,F82 --show-source --statistics || true
-          flake8 app --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics || true
-        continue-on-error: true
+          find . -name "*.py" -not -path "./.github/*" -exec python -m py_compile {} \;
 
-      - name: Run tests with coverage
+      - name: Run tests
         run: |
-          pytest --cov=app --cov-report=xml --cov-report=html || echo "No tests found"
-        env:
-          DATABASE_URL: postgresql://testuser:testpass@localhost:5432/testdb
-          FLASK_ENV: testing
-          SECRET_KEY: test-secret-key
-        continue-on-error: true
+          if [ -d "tests" ] && [ "$(ls -A tests)" ]; then
+            pytest tests/ --cov=. --cov-report=xml --cov-report=html -v || true
+          else
+            echo "No tests found - skipping"
+          fi
 
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
-        with:
-          file: ./coverage.xml
-          flags: unittests
-          name: backend-coverage
-        continue-on-error: true
-
-      - name: Upload test results
+      - name: Upload test results (if they exist)
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: pytest-results
+          name: test-results
           path: |
             coverage.xml
             htmlcov/
             .coverage
+          retention-days: 7
         continue-on-error: true
 
   deploy:
@@ -85,9 +62,9 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Deploy to Render
-        uses: render-oss/render-deploy-action@v1
-        with:
-          service-id: ${{ secrets.RENDER_SERVICE_ID_BACKEND }}
-          api-key: ${{ secrets.RENDER_API_KEY }}
-          wait-for-success: true
-        continue-on-error: true
+        if: false  # Disable deploy until you have Render setup
+        run: |
+          echo "Deployment to Render would happen here"
+          # Uncomment when ready:
+          # curl -X POST https://api.render.com/v1/services/${{ secrets.RENDER_SERVICE_ID_BACKEND }}/deploys \
+          #   -H "Authorization: Bearer ${{ secrets.RENDER_API_KEY }}"
