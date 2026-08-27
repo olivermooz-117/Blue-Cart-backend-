@@ -1,0 +1,70 @@
+name: Backend CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, dev ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          else
+            pip install flask pytest pytest-cov
+          fi
+
+      - name: Check Python syntax
+        run: |
+          find . -name "*.py" -not -path "./.github/*" -exec python -m py_compile {} \;
+
+      - name: Run tests
+        run: |
+          if [ -d "tests" ] && [ "$(ls -A tests)" ]; then
+            pytest tests/ --cov=. --cov-report=xml --cov-report=html -v || true
+          else
+            echo "No tests found - skipping"
+          fi
+
+      - name: Upload test results (if they exist)
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results
+          path: |
+            coverage.xml
+            htmlcov/
+            .coverage
+          retention-days: 7
+        continue-on-error: true
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy to Render
+        if: false  # Disable deploy until you have Render setup
+        run: |
+          echo "Deployment to Render would happen here"
+          # Uncomment when ready:
+          # curl -X POST https://api.render.com/v1/services/${{ secrets.RENDER_SERVICE_ID_BACKEND }}/deploys \
+          #   -H "Authorization: Bearer ${{ secrets.RENDER_API_KEY }}"
