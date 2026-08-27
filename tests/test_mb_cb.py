@@ -6,7 +6,6 @@ def test_rank_listings_prefers_cheaper_higher_rated():
         {
             "site": "X",
             "price": 30098,
-            "delivery_cost": 200,
             "rating": 4.7,
             "num_ratings": 10,
             "pay_on_delivery": True,
@@ -14,7 +13,6 @@ def test_rank_listings_prefers_cheaper_higher_rated():
         {
             "site": "Y",
             "price": 29999,
-            "delivery_cost": 150,
             "rating": 4.0,
             "num_ratings": 4,
             "pay_on_delivery": False,
