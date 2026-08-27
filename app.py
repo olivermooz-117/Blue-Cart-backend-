@@ -31,8 +31,16 @@ def create_app():
         db.create_all()
         print("Database tables created.")
 
+    # Auto-create tables on boot so a fresh deploy works without shell access
+    # to run a migration step (fine for a small project; a real migration
+    # tool like Flask-Migrate would replace this at larger scale).
+    with app.app_context():
+        db.create_all()
+
     return app
 
 
+app = create_app()
+
 if __name__ == "__main__":
-    create_app().run(debug=True, port=5000)
+    app.run(debug=True, port=5000)
