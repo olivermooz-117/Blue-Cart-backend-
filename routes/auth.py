@@ -6,6 +6,7 @@ from models import User
 
 auth_bp = Blueprint("auth", __name__, url_prefix="/api/auth")
 
+
 @auth_bp.route("/register", methods=["POST"])
 def register():
     body = request.get_json(force=True) or {}
@@ -25,6 +26,7 @@ def register():
 
     token = create_access_token(identity=str(user.id))
     return jsonify({"access_token": token, "email": user.email}), 201
+
 
 @auth_bp.route("/login", methods=["POST"])
 def login():
