@@ -1,25 +1,5 @@
-try:
-    from flask import Blueprint, jsonify, request  # type: ignore
-except Exception as e:
-    raise RuntimeError(
-        "Flask is required to run this module. Install it with: pip install flask"
-    ) from e
-
-try:
-    try:
-        from flask_jwt_extended import get_jwt_identity, verify_jwt_in_request  # type: ignore[import]
-    except Exception:  # pragma: no cover - optional dependency for guest searches
-        def get_jwt_identity():
-            return None
-
-        def verify_jwt_in_request(*args, **kwargs):
-            return None
-except Exception:  # pragma: no cover - optional dependency for guest searches
-    def get_jwt_identity():
-        return None
-
-    def verify_jwt_in_request(*args, **kwargs):
-        return None
+from flask import Blueprint, jsonify, request
+from flask_jwt_extended import get_jwt_identity
 
 from extensions import db
 from models import SearchHistory
@@ -59,8 +39,8 @@ def filter_search():
 def _optional_user_id():
     """Return the JWT identity if a valid token was sent, else None (guest search)."""
     try:
-        # Use the verify_jwt_in_request that's either provided by flask_jwt_extended
-        # or the fallback defined above when that package is not installed.
+        from flask_jwt_extended import verify_jwt_in_request
+
         verify_jwt_in_request(optional=True)
         identity = get_jwt_identity()
         return int(identity) if identity is not None else None
