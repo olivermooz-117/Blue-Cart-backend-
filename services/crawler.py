@@ -6,10 +6,11 @@ platform offers a self-serve official search API. eBay uses eBay's own
 Browse API via OAuth2 client-credentials, but returns no results until
 EBAY_CLIENT_ID/EBAY_CLIENT_SECRET are set (eBay approval pending).
 
-Each fetcher returns at most one listing (the top/most relevant match)
-so the rest of the app can keep comparing "one result per site," same
-as before. A site that errors, times out, or isn't configured yet is
-simply left out of the results rather than failing the whole search.
+Each fetcher returns up to MAX_LISTINGS_PER_SITE relevant listings (not
+just the top match), so results look like a real marketplace rather
+than one card per site. A site that errors, times out, or isn't
+configured yet simply contributes no listings rather than failing the
+whole search.
 """
 
 import time
@@ -21,6 +22,7 @@ from config import Config
 SITES = ["Amazon", "AliExpress", "eBay"]
 
 REQUEST_TIMEOUT = 10
+MAX_LISTINGS_PER_SITE = 6
 
 _ebay_token_cache = {"access_token": None, "expires_at": 0}
 
@@ -62,8 +64,8 @@ def _parse_float(value):
 
 
 def fetch_from_amazon(query):
-    if not Config.RAPIDAPI_KEY:
-        return None
+    if not Config.RAPIDAPI_AMAZON_KEY:
+        return []
 
     try:
         response = requests.get(
@@ -79,38 +81,39 @@ def fetch_from_amazon(query):
             },
             headers={
                 "x-rapidapi-host": Config.RAPIDAPI_AMAZON_HOST,
-                "x-rapidapi-key": Config.RAPIDAPI_KEY,
+                "x-rapidapi-key": Config.RAPIDAPI_AMAZON_KEY,
             },
             timeout=REQUEST_TIMEOUT,
         )
         response.raise_for_status()
         products = response.json().get("data", {}).get("products", [])
     except (requests.RequestException, ValueError):
-        return None
+        return []
 
+    listings = []
     for product in products:
+        if len(listings) >= MAX_LISTINGS_PER_SITE:
+            break
         price_usd = _parse_float(product.get("product_price"))
         title = product.get("product_title", query)
         if price_usd is None or not _is_relevant(query, title):
             continue
-        return {
+        listings.append({
             "site": "Amazon",
             "title": title,
             "price": _to_kes(price_usd),
-            # This API doesn't expose a numeric shipping cost.
-            "delivery_cost": 0.0,
             "rating": _parse_float(product.get("product_star_rating")) or 0.0,
             "num_ratings": int(product.get("product_num_ratings") or 0),
             "pay_on_delivery": False,
             "url": product.get("product_url"),
             "image": product.get("product_photo"),
-        }
-    return None
+        })
+    return listings
 
 
 def fetch_from_aliexpress(query, _retries=2):
-    if not Config.RAPIDAPI_KEY:
-        return None
+    if not Config.RAPIDAPI_ALIEXPRESS_KEY:
+        return []
 
     for attempt in range(_retries):
         try:
@@ -119,7 +122,7 @@ def fetch_from_aliexpress(query, _retries=2):
                 params={"q": query, "page": 1, "sort": "default"},
                 headers={
                     "x-rapidapi-host": Config.RAPIDAPI_ALIEXPRESS_HOST,
-                    "x-rapidapi-key": Config.RAPIDAPI_KEY,
+                    "x-rapidapi-key": Config.RAPIDAPI_ALIEXPRESS_KEY,
                 },
                 timeout=REQUEST_TIMEOUT,
             )
@@ -133,29 +136,30 @@ def fetch_from_aliexpress(query, _retries=2):
             results = []
             continue
     else:
-        return None
+        return []
 
+    listings = []
     for entry in results:
+        if len(listings) >= MAX_LISTINGS_PER_SITE:
+            break
         item = entry.get("item", {})
         sku = item.get("sku", {}).get("def", {})
         price_usd = _parse_float(sku.get("promotionPrice")) or _parse_float(sku.get("price"))
         title = item.get("title", query)
         if price_usd is None or not _is_relevant(query, title):
             continue
-        return {
+        listings.append({
             "site": "AliExpress",
             "title": title,
             "price": _to_kes(price_usd),
-            # This API doesn't expose a numeric shipping cost.
-            "delivery_cost": 0.0,
             "rating": _parse_float(item.get("averageStarRate")) or 0.0,
             # No review-count field in this response tier.
             "num_ratings": 0,
             "pay_on_delivery": False,
             "url": _absolute_url(item.get("itemUrl")),
             "image": _absolute_url(item.get("image")),
-        }
-    return None
+        })
+    return listings
 
 
 def _get_ebay_token():
@@ -193,12 +197,12 @@ def _get_ebay_token():
 def fetch_from_ebay(query):
     token = _get_ebay_token()
     if not token:
-        return None
+        return []
 
     try:
         response = requests.get(
             "https://api.ebay.com/buy/browse/v1/item_summary/search",
-            params={"q": query, "limit": 5},
+            params={"q": query, "limit": MAX_LISTINGS_PER_SITE * 2},
             headers={
                 "Authorization": f"Bearer {token}",
                 "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
@@ -208,31 +212,31 @@ def fetch_from_ebay(query):
         response.raise_for_status()
         items = response.json().get("itemSummaries", [])
     except (requests.RequestException, ValueError):
-        return None
+        return []
 
+    listings = []
     for item in items:
+        if len(listings) >= MAX_LISTINGS_PER_SITE:
+            break
         price_usd = _parse_float((item.get("price") or {}).get("value"))
         title = item.get("title", query)
         if price_usd is None or not _is_relevant(query, title):
             continue
-        shipping_options = item.get("shippingOptions") or [{}]
-        delivery_usd = _parse_float((shipping_options[0].get("shippingCost") or {}).get("value")) or 0.0
         seller = item.get("seller") or {}
         # eBay's Browse API has no star rating; feedbackPercentage (0-100) is
         # the closest real signal, scaled onto the same 0-5 range as the others.
         feedback_pct = _parse_float(seller.get("feedbackPercentage"))
-        return {
+        listings.append({
             "site": "eBay",
             "title": title,
             "price": _to_kes(price_usd),
-            "delivery_cost": _to_kes(delivery_usd),
             "rating": round(feedback_pct / 20, 1) if feedback_pct is not None else 0.0,
             "num_ratings": int(seller.get("feedbackScore") or 0),
             "pay_on_delivery": False,
             "url": item.get("itemWebUrl"),
             "image": (item.get("image") or {}).get("imageUrl"),
-        }
-    return None
+        })
+    return listings
 
 
 FETCHERS = {
@@ -245,16 +249,14 @@ FETCHERS = {
 def fetch_all(query):
     """Query every configured site and return whatever listings came back.
 
-    A site with no credentials configured, or whose request failed, is
-    silently omitted rather than raising — the search still succeeds with
-    however many real sites responded.
+    A site with no credentials configured, or whose request failed, simply
+    contributes no listings rather than failing the whole search.
     """
     listings = []
     for fetcher in FETCHERS.values():
         try:
-            listing = fetcher(query)
+            site_listings = fetcher(query)
         except Exception:
-            listing = None
-        if listing:
-            listings.append(listing)
+            site_listings = []
+        listings.extend(site_listings or [])
     return listings
