@@ -4,6 +4,7 @@ from flask_cors import CORS
 from config import Config
 from extensions import bcrypt, db, jwt
 from routes.auth import auth_bp
+from routes.history import history_bp
 from routes.search import search_bp
 
 
@@ -18,6 +19,7 @@ def create_app():
 
     app.register_blueprint(search_bp)
     app.register_blueprint(auth_bp)
+    app.register_blueprint(history_bp)
 
     @app.route("/api/health")
     def health():
