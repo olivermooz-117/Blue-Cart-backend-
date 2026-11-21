@@ -3,9 +3,13 @@ from flask_jwt_extended import get_jwt_identity
 
 from extensions import db
 from models import SearchHistory
-from services import crawler, mb_cb
+from services import cache, crawler, mb_cb
 
 search_bp = Blueprint("search", __name__, url_prefix="/api/search")
+
+
+def _client_ip():
+    return request.headers.get("X-Forwarded-For", request.remote_addr or "")
 
 
 @search_bp.route("", methods=["GET"])
@@ -14,15 +18,26 @@ def search():
     if not query:
         return jsonify({"error": "Query parameter 'q' is required"}), 400
 
-    listings = crawler.fetch_all(query)
+    ip = _client_ip()
+    if not cache.rate_limit_allowed(ip):
+        return jsonify({"error": "Too many requests. Please try again later."}), 429
+
+    cached = cache.cache_get(query)
+    if cached is not None:
+        return jsonify({"query": query, "results": cached, "cached": True})
+
+    listings, site_counts = crawler.fetch_all(query)
     ranked = mb_cb.rank_listings(listings)
+
+    cache.cache_set(query, ranked)
 
     user_id = _optional_user_id()
     if user_id:
         db.session.add(SearchHistory(user_id=user_id, search_query=query))
         db.session.commit()
 
-    return jsonify({"query": query, "results": ranked})
+    sites = [site for site, count in site_counts.items() if count > 0]
+    return jsonify({"query": query, "results": ranked, "sites": sites, "cached": False})
 
 
 @search_bp.route("/filter", methods=["POST"])

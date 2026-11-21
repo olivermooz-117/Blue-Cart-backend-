@@ -2,9 +2,14 @@ from flask import Flask
 from flask_cors import CORS
 from config import Config
 from extensions import bcrypt, db, jwt
+from flask_migrate import Migrate
 from routes.auth import auth_bp
 from routes.history import history_bp
+from routes.reviews import reviews_bp
 from routes.search import search_bp
+
+migrate = Migrate()
+
 
 def create_app(config_overrides=None):
     app = Flask(__name__)
@@ -17,10 +22,12 @@ def create_app(config_overrides=None):
     db.init_app(app)
     bcrypt.init_app(app)
     jwt.init_app(app)
+    migrate.init_app(app, db)
 
     app.register_blueprint(search_bp)
     app.register_blueprint(auth_bp)
     app.register_blueprint(history_bp)
+    app.register_blueprint(reviews_bp)
 
     @app.route("/api/health")
     def health():
@@ -28,8 +35,10 @@ def create_app(config_overrides=None):
 
     @app.cli.command("init-db")
     def init_db():
+        """Create all tables directly (local/dev convenience). Prefer
+        `flask db upgrade` for managed schema migrations."""
         db.create_all()
-        print("Database tables created.")
+        print("Database tables created via db.create_all().")
 
     # ← NO db.create_all() here anymore
     return app

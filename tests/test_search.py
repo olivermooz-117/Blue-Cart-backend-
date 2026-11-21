@@ -21,7 +21,10 @@ def test_search_returns_structure(client):
         }
     ]
 
-    with patch("services.crawler.fetch_all", return_value=mock_listings):
+    with patch(
+        "services.crawler.fetch_all",
+        return_value=(mock_listings, {"Amazon": 1}),
+    ):
         response = client.get("/api/search?q=phone")
         data = response.get_json()
 
@@ -34,9 +37,10 @@ def test_search_returns_structure(client):
 
 
 def test_search_empty_results(client):
-    with patch("services.crawler.fetch_all", return_value=[]):
+    with patch("services.crawler.fetch_all", return_value=([], {})):
         response = client.get("/api/search?q=nonexistent")
         data = response.get_json()
 
     assert response.status_code == 200
     assert data["results"] == []
+    assert data["sites"] == []

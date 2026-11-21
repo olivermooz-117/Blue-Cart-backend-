@@ -43,7 +43,11 @@ def rank_listings(listings, weights=None):
 
     mb_raw = []
     for listing, price_score, rating_score in zip(listings, price_scores, rating_scores):
-        trust_score = 1.0 if listing.get("pay_on_delivery") else 0.5
+        # Trust = pay-on-delivery bonus (biggest differentiator) plus a
+        # smaller component from the normalized rating, so a highly-rated
+        # listing without COD still edges a poorly-rated one with it.
+        pay_bonus = 1.0 if listing.get("pay_on_delivery") else 0.0
+        trust_score = 0.6 * pay_bonus + 0.4 * rating_score
         mb_raw.append(
             weights["price"] * price_score
             + weights["rating"] * rating_score

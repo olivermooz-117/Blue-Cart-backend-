@@ -14,7 +14,7 @@ def test_history_empty_for_new_user(client, auth_headers):
 
 def test_history_records_search(client, auth_headers):
     # Perform a search while authenticated (this should save history)
-    with patch("services.crawler.fetch_all", return_value=[]):
+    with patch("services.crawler.fetch_all", return_value=([], {})):
         client.get("/api/search?q=headphones", headers=auth_headers)
 
     response = client.get("/api/history", headers=auth_headers)

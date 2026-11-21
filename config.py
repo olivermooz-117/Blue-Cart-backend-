@@ -35,3 +35,24 @@ class Config:
 
     # No live FX API configured — fixed approximate rate, update as needed.
     USD_TO_KES_RATE = float(os.environ.get("USD_TO_KES_RATE", "130"))
+
+    # Search-result cache TTL (seconds), within the 10-15 minute window.
+    SEARCH_CACHE_TTL_SECONDS = int(os.environ.get("SEARCH_CACHE_TTL_SECONDS", "720"))
+
+    # Per-IP rate limiting on the search endpoint.
+    RATE_LIMIT_REQUESTS = int(os.environ.get("RATE_LIMIT_REQUESTS", "30"))
+    RATE_LIMIT_WINDOW_SECONDS = int(os.environ.get("RATE_LIMIT_WINDOW_SECONDS", "60"))
+
+    # Optional Redis URL for shared search-result caching and rate limiting.
+    # When unset (or Redis is unavailable), the in-memory cache is used.
+    REDIS_URL = os.environ.get("REDIS_URL", "")
+
+    # Site-level defaults for `pay_on_delivery` (cash on delivery). None of the
+    # upstream marketplace APIs reliably expose payment methods, so these are
+    # conservative, operator-overridable defaults rather than live data.
+    # Set e.g. PAY_ON_DELIVERY_ALIEXPRESS=true in the environment to flip a site.
+    PAY_ON_DELIVERY_DEFAULTS = {
+        "Amazon": os.environ.get("PAY_ON_DELIVERY_AMAZON", "false").lower() == "true",
+        "AliExpress": os.environ.get("PAY_ON_DELIVERY_ALIEXPRESS", "false").lower() == "true",
+        "eBay": os.environ.get("PAY_ON_DELIVERY_EBAY", "false").lower() == "true",
+    }
