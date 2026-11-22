@@ -71,7 +71,8 @@ def test_reviews_create_guest_attaches_no_user(client):
     })
     data = response.get_json()
     assert response.status_code == 201
-    assert data["user_id"] is None
+    assert "user_id" not in data
+    assert data["author"] == "Alice"
 
 
 def test_reviews_create_attaches_user_id(client, auth_headers):
@@ -84,7 +85,9 @@ def test_reviews_create_attaches_user_id(client, auth_headers):
     }, headers=auth_headers)
     data = response.get_json()
     assert response.status_code == 201
-    assert data["user_id"] is not None
+    assert "user_id" not in data
+    # author is the email local part, not the full email, and not the body value
+    assert data["author"] == "test"
 
 
 def test_reviews_get_returns_created(client):

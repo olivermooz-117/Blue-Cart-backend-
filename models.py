@@ -3,13 +3,26 @@ from datetime import datetime, timezone
 from extensions import db
 
 
+def utc_now():
+    """Callable default: current UTC time, timezone-aware."""
+    return datetime.now(timezone.utc)
+
+
+def _iso_utc(value):
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.isoformat()
+
+
 class User(db.Model):
     __tablename__ = "users"
 
     id = db.Column(db.Integer, primary_key=True)
     email = db.Column(db.String(120), unique=True, nullable=False)
     password_hash = db.Column(db.String(255), nullable=False)
-    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = db.Column(db.DateTime, default=utc_now)
 
     searches = db.relationship("SearchHistory", backref="user", lazy=True)
     reviews = db.relationship("Review", backref="user", lazy=True)
@@ -24,7 +37,7 @@ class SearchHistory(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
     search_query = db.Column(db.String(255), nullable=False)
-    searched_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    searched_at = db.Column(db.DateTime, default=utc_now)
 
 
 class Review(db.Model):
@@ -33,13 +46,18 @@ class Review(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     # Stored in DB column `query`; Python attribute `search_query` avoids
     # shadowing SQLAlchemy's Model.query property.
-    search_query = db.Column("query", db.String(255), nullable=False, index=True)
-    shop = db.Column(db.String(120), nullable=False)
-    author = db.Column(db.String(120), nullable=False)
+    search_query = db.Column("query", db.String(255), nullable=False)
+    query_key = db.Column(db.String(255), nullable=False, index=True)
+    shop = db.Column(db.String(50), nullable=False)
+    author = db.Column(db.String(50), nullable=False)
     comment = db.Column(db.Text, nullable=False)
-    rating = db.Column(db.Float, nullable=False)
+    rating = db.Column(db.Integer, nullable=False)
     user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
-    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = db.Column(db.DateTime, default=utc_now)
+
+    __table_args__ = (
+        db.CheckConstraint("rating >= 1 AND rating <= 5", name="chk_reviews_rating"),
+    )
 
     def to_dict(self):
         return {
@@ -49,8 +67,7 @@ class Review(db.Model):
             "author": self.author,
             "comment": self.comment,
             "rating": self.rating,
-            "user_id": self.user_id,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "created_at": _iso_utc(self.created_at),
         }
 
 
@@ -61,7 +78,7 @@ class SearchCache(db.Model):
 
     query = db.Column(db.String(255), primary_key=True)
     results = db.Column(db.JSON, nullable=False)
-    fetched_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    fetched_at = db.Column(db.DateTime, default=utc_now)
     expires_at = db.Column(db.DateTime, nullable=False)
 
 
@@ -75,6 +92,6 @@ class UserPreference(db.Model):
     preferred_shops = db.Column(db.JSON, nullable=False, default=list)
     updated_at = db.Column(
         db.DateTime,
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
+        default=utc_now,
+        onupdate=utc_now,
     )
