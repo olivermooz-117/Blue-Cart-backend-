@@ -39,6 +39,10 @@ class SearchHistory(db.Model):
     search_query = db.Column(db.String(255), nullable=False)
     searched_at = db.Column(db.DateTime, default=utc_now)
 
+    __table_args__ = (
+        db.Index("ix_search_history_user_searched", "user_id", "searched_at"),
+    )
+
 
 class Review(db.Model):
     __tablename__ = "reviews"
