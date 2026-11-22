@@ -3,4 +3,9 @@ __pycache__/
 .env
 .venv/
 venv/
-instance/*.db
+instance/
+*.db
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
