@@ -1,5 +1,7 @@
-from flask import Flask
+import logging
+from flask import Flask, jsonify
 from flask_cors import CORS
+from werkzeug.exceptions import HTTPException
 from config import Config
 from extensions import bcrypt, db, jwt
 from flask_migrate import Migrate
@@ -7,8 +9,11 @@ from routes.auth import auth_bp
 from routes.history import history_bp
 from routes.reviews import reviews_bp
 from routes.search import search_bp
+from validation import ApiError
 
 migrate = Migrate()
+
+logger = logging.getLogger(__name__)
 
 
 def create_app(config_overrides=None):
@@ -29,6 +34,19 @@ def create_app(config_overrides=None):
     app.register_blueprint(history_bp)
     app.register_blueprint(reviews_bp)
 
+    @app.errorhandler(ApiError)
+    def handle_api_error(err):
+        return jsonify({"error": err.message}), err.status
+
+    @app.errorhandler(HTTPException)
+    def handle_http_error(err):
+        return jsonify({"error": err.name or "error"}), err.code
+
+    @app.errorhandler(Exception)
+    def handle_unexpected(err):
+        logger.exception("Unhandled error: %s", err)
+        return jsonify({"error": "internal server error"}), 500
+
     @app.route("/api/health")
     def health():
         return {"status": "ok"}
@@ -40,7 +58,6 @@ def create_app(config_overrides=None):
         db.create_all()
         print("Database tables created via db.create_all().")
 
-    # ← NO db.create_all() here anymore
     return app
 
 

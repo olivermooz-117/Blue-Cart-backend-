@@ -101,7 +101,7 @@ def fetch_from_amazon(query):
             break
         price_usd = _parse_float(product.get("product_price"))
         title = product.get("product_title", query)
-        if price_usd is None or not _is_relevant(query, title):
+        if price_usd is None or price_usd <= 0 or not _is_relevant(query, title):
             continue
         listings.append({
             "site": "Amazon",
@@ -157,7 +157,7 @@ def fetch_from_aliexpress(query, _retries=2):
         sku = item.get("sku", {}).get("def", {})
         price_usd = _parse_float(sku.get("promotionPrice")) or _parse_float(sku.get("price"))
         title = item.get("title", query)
-        if price_usd is None or not _is_relevant(query, title):
+        if price_usd is None or price_usd <= 0 or not _is_relevant(query, title):
             continue
         listings.append({
             "site": "AliExpress",
@@ -233,7 +233,7 @@ def fetch_from_ebay(query):
             break
         price_usd = _parse_float((item.get("price") or {}).get("value"))
         title = item.get("title", query)
-        if price_usd is None or not _is_relevant(query, title):
+        if price_usd is None or price_usd <= 0 or not _is_relevant(query, title):
             continue
         seller = item.get("seller") or {}
         # eBay's Browse API has no star rating; feedbackPercentage (0-100) is
