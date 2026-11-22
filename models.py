@@ -26,9 +26,6 @@ class User(db.Model):
 
     searches = db.relationship("SearchHistory", backref="user", lazy=True)
     reviews = db.relationship("Review", backref="user", lazy=True)
-    preferences = db.relationship(
-        "UserPreference", backref="user", lazy=True, uselist=False
-    )
 
 
 class SearchHistory(db.Model):
@@ -73,29 +70,3 @@ class Review(db.Model):
             "rating": self.rating,
             "created_at": _iso_utc(self.created_at),
         }
-
-
-class SearchCache(db.Model):
-    """In-DB cache of search results keyed by normalized query."""
-
-    __tablename__ = "search_cache"
-
-    query = db.Column(db.String(255), primary_key=True)
-    results = db.Column(db.JSON, nullable=False)
-    fetched_at = db.Column(db.DateTime, default=utc_now)
-    expires_at = db.Column(db.DateTime, nullable=False)
-
-
-class UserPreference(db.Model):
-    """Logged-in user's saved ranking preferences."""
-
-    __tablename__ = "user_preferences"
-
-    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), primary_key=True)
-    default_weights = db.Column(db.JSON, nullable=False, default=dict)
-    preferred_shops = db.Column(db.JSON, nullable=False, default=list)
-    updated_at = db.Column(
-        db.DateTime,
-        default=utc_now,
-        onupdate=utc_now,
-    )

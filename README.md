@@ -48,6 +48,34 @@ Prices are mocked in KES (Ksh).
 
 Run tests with `pytest` from `backend/`.
 
+## Deployment
+
+Start command:
+
+```bash
+flask db upgrade && gunicorn app:app
+```
+
+One-time step for an existing production database (schema was created before
+migrations existed):
+
+```bash
+flask db stamp 0001_baseline
+flask db upgrade
+```
+
+Required environment variables in production (`FLASK_ENV=production`):
+
+| Variable | Description |
+|----------|-------------|
+| `DATABASE_URL` | PostgreSQL connection string |
+| `SECRET_KEY` | Flask secret key (>= 32 chars in production) |
+| `JWT_SECRET_KEY` | JWT signing key (>= 32 chars in production) |
+| `CORS_ORIGINS` | Comma separated allowed origins |
+| `RAPIDAPI_KEY` / `RAPIDAPI_AMAZON_KEY` / `RAPIDAPI_ALIEXPRESS_KEY` | RapidAPI keys for marketplace wrappers |
+
+See `.env.example` for the full list of optional variables.
+
 ## Environment variables
 
 Copy `.env.example` to `.env` and set:
