@@ -3,10 +3,9 @@ from math import isfinite
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import get_jwt_identity
 
-from extensions import db
+from extensions import db, limiter
 from models import SearchHistory
-from services import cache, crawler, mb_cb
-from services.mb_cb import DEFAULT_WEIGHTS
+from services import crawler, mb_cb
 from validation import ApiError, get_json_object
 
 search_bp = Blueprint("search", __name__, url_prefix="/api/search")
@@ -17,34 +16,26 @@ def _client_ip():
 
 
 @search_bp.route("", methods=["GET"])
+@limiter.limit("30/minute")
 def search():
     query = request.args.get("q", "").strip()
     if not query:
         raise ApiError("Query parameter 'q' is required", 400)
 
-    ip = _client_ip()
-    if not cache.rate_limit_allowed(ip):
-        return jsonify({"error": "Too many requests. Please try again later."}), 429
-
-    cached = cache.cache_get(query)
-    if cached is not None:
-        return jsonify({"query": query, "results": cached, "cached": True})
-
-    listings, site_counts = crawler.fetch_all(query)
+    listings, _site_counts = crawler.fetch_all(query)
     ranked = mb_cb.rank_listings(listings)
-
-    cache.cache_set(query, ranked)
 
     user_id = _optional_user_id()
     if user_id:
         db.session.add(SearchHistory(user_id=user_id, search_query=query))
         db.session.commit()
 
-    sites = [site for site, count in site_counts.items() if count > 0]
-    return jsonify({"query": query, "results": ranked, "sites": sites, "cached": False})
+    sites = sorted({listing.get("site") for listing in ranked if listing.get("site")})
+    return jsonify({"query": query, "results": ranked, "sites": sites})
 
 
 @search_bp.route("/filter", methods=["POST"])
+@limiter.limit("60/minute")
 def filter_search():
     """Re-rank a set of listings the client already has using custom weights."""
     body = get_json_object()
@@ -116,8 +107,9 @@ def filter_search():
     if supplied and all(value == 0 for value in supplied.values()):
         raise ApiError("weights: at least one supplied weight must be > 0", 400)
 
-    cleaned_weights = {**DEFAULT_WEIGHTS, **supplied}
+    from services.mb_cb import DEFAULT_WEIGHTS
 
+    cleaned_weights = {**DEFAULT_WEIGHTS, **supplied}
     ranked = mb_cb.rank_listings(listings, cleaned_weights)
     return jsonify({"results": ranked})
 

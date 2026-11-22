@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import get_jwt_identity, verify_jwt_in_request
 
-from extensions import db
+from extensions import db, limiter
 from models import Review
 
 reviews_bp = Blueprint("reviews", __name__, url_prefix="/api/search")
@@ -38,6 +38,7 @@ def get_reviews():
 
 
 @reviews_bp.route("/reviews", methods=["POST"])
+@limiter.limit("5/minute")
 def create_review():
     """Create a review for a shop/product under a search query.
 

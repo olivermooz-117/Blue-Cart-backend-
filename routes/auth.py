@@ -2,7 +2,7 @@ from flask import Blueprint, jsonify
 from flask_jwt_extended import create_access_token
 from sqlalchemy.exc import IntegrityError
 
-from extensions import bcrypt, db
+from extensions import bcrypt, db, limiter
 from models import User
 from validation import ApiError, clean_str, EMAIL_REGEX, get_json_object
 
@@ -15,6 +15,7 @@ _DUMMY_PASSWORD_HASH = bcrypt.generate_password_hash("x" * 40).decode("utf-8")
 
 
 @auth_bp.route("/register", methods=["POST"])
+@limiter.limit("10/minute")
 def register():
     body = get_json_object()
 
@@ -46,6 +47,7 @@ def register():
 
 
 @auth_bp.route("/login", methods=["POST"])
+@limiter.limit("10/minute")
 def login():
     body = get_json_object()
 

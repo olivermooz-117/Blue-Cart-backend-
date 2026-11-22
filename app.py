@@ -2,8 +2,9 @@ import logging
 from flask import Flask, jsonify
 from flask_cors import CORS
 from werkzeug.exceptions import HTTPException
+from werkzeug.middleware.proxy_fix import ProxyFix
 from config import Config
-from extensions import bcrypt, db, jwt
+from extensions import bcrypt, db, jwt, limiter
 from flask_migrate import Migrate
 from routes.auth import auth_bp
 from routes.history import history_bp
@@ -23,10 +24,28 @@ def create_app(config_overrides=None):
     if config_overrides:
         app.config.update(config_overrides)
 
-    CORS(app)
+    # Rate limiting is disabled under TESTING unless a test enables it.
+    app.config.setdefault("RATELIMIT_ENABLED", not app.config.get("TESTING", False))
+
+    # Trust Render's proxy for the real client IP (rate limiting, logs).
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1)
+
+    allowed_origins = [
+        origin.strip() for origin in Config.CORS_ORIGINS.split(",") if origin.strip()
+    ]
+    CORS(
+        app,
+        resources={
+            r"/api/*": {
+                "origins": allowed_origins,
+                "allow_headers": ["Authorization", "Content-Type"],
+            }
+        },
+    )
     db.init_app(app)
     bcrypt.init_app(app)
     jwt.init_app(app)
+    limiter.init_app(app)
     migrate.init_app(app, db)
 
     @jwt.expired_token_loader
