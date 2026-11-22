@@ -29,6 +29,26 @@ def create_app(config_overrides=None):
     jwt.init_app(app)
     migrate.init_app(app, db)
 
+    @jwt.expired_token_loader
+    def _expired_token_callback(jwt_header, jwt_payload):
+        return jsonify({"error": "token expired"}), 401
+
+    @jwt.invalid_token_loader
+    def _invalid_token_callback(reason):
+        return jsonify({"error": "invalid token"}), 401
+
+    @jwt.unauthorized_loader
+    def _unauthorized_callback(reason):
+        return jsonify({"error": "authorization required"}), 401
+
+    @jwt.revoked_token_loader
+    def _revoked_token_callback(jwt_header, jwt_payload):
+        return jsonify({"error": "token revoked"}), 401
+
+    @jwt.needs_fresh_token_loader
+    def _needs_fresh_token_callback(jwt_header, jwt_payload):
+        return jsonify({"error": "fresh token required"}), 401
+
     app.register_blueprint(search_bp)
     app.register_blueprint(auth_bp)
     app.register_blueprint(history_bp)

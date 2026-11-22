@@ -126,9 +126,12 @@ def _optional_user_id():
     """Return the JWT identity if a valid token was sent, else None (guest search)."""
     try:
         from flask_jwt_extended import verify_jwt_in_request
+        from flask_jwt_extended.exceptions import JWTExtendedException
+
+        import jwt
 
         verify_jwt_in_request(optional=True)
         identity = get_jwt_identity()
         return int(identity) if identity is not None else None
-    except Exception:
+    except (JWTExtendedException, jwt.exceptions.PyJWTError, ValueError):
         return None
