@@ -10,19 +10,32 @@ Each fetcher returns up to MAX_LISTINGS_PER_SITE relevant listings (not
 just the top match), so results look like a real marketplace rather
 than one card per site. A site that errors, times out, or isn't
 configured yet simply contributes no listings rather than failing the
-whole search.
+whole search. Per-site failures are logged so operators can tell which
+marketplace is down.
+
+Fetchers run concurrently; results for non-empty queries are cached in
+memory (see services.cache) so repeated searches don't hit the upstream
+APIs again within the TTL.
 """
 
+import logging
 import time
+from concurrent.futures import ThreadPoolExecutor, wait
 
 import requests
 
 from config import Config
+from services.cache import search_cache
 
 SITES = ["Amazon", "AliExpress", "eBay"]
 
 REQUEST_TIMEOUT = 10
 MAX_LISTINGS_PER_SITE = 6
+
+FETCH_ALL_TIMEOUT = 15
+FETCH_ALL_WORKERS = 3
+
+logger = logging.getLogger(__name__)
 
 _ebay_token_cache = {"access_token": None, "expires_at": 0}
 
@@ -87,7 +100,8 @@ def fetch_from_amazon(query):
         )
         response.raise_for_status()
         products = response.json().get("data", {}).get("products", [])
-    except (requests.RequestException, ValueError):
+    except (requests.RequestException, ValueError) as exc:
+        logger.warning("Amazon fetch failed for %r: %s", query, exc)
         return []
 
     listings = []
@@ -96,7 +110,7 @@ def fetch_from_amazon(query):
             break
         price_usd = _parse_float(product.get("product_price"))
         title = product.get("product_title", query)
-        if price_usd is None or not _is_relevant(query, title):
+        if price_usd is None or price_usd <= 0 or not _is_relevant(query, title):
             continue
         listings.append({
             "site": "Amazon",
@@ -104,7 +118,7 @@ def fetch_from_amazon(query):
             "price": _to_kes(price_usd),
             "rating": _parse_float(product.get("product_star_rating")) or 0.0,
             "num_ratings": int(product.get("product_num_ratings") or 0),
-            "pay_on_delivery": False,
+            "pay_on_delivery": Config.PAY_ON_DELIVERY_DEFAULTS.get("Amazon", False),
             "url": product.get("product_url"),
             "image": product.get("product_photo"),
         })
@@ -132,7 +146,13 @@ def fetch_from_aliexpress(query, _retries=2):
                 continue
             results = body["result"].get("resultList", [])
             break
-        except (requests.RequestException, ValueError, KeyError):
+        except (requests.RequestException, ValueError, KeyError) as exc:
+            logger.warning(
+                "AliExpress fetch attempt %d failed for %r: %s",
+                attempt + 1,
+                query,
+                exc,
+            )
             results = []
             continue
     else:
@@ -146,7 +166,7 @@ def fetch_from_aliexpress(query, _retries=2):
         sku = item.get("sku", {}).get("def", {})
         price_usd = _parse_float(sku.get("promotionPrice")) or _parse_float(sku.get("price"))
         title = item.get("title", query)
-        if price_usd is None or not _is_relevant(query, title):
+        if price_usd is None or price_usd <= 0 or not _is_relevant(query, title):
             continue
         listings.append({
             "site": "AliExpress",
@@ -155,7 +175,7 @@ def fetch_from_aliexpress(query, _retries=2):
             "rating": _parse_float(item.get("averageStarRate")) or 0.0,
             # No review-count field in this response tier.
             "num_ratings": 0,
-            "pay_on_delivery": False,
+            "pay_on_delivery": Config.PAY_ON_DELIVERY_DEFAULTS.get("AliExpress", False),
             "url": _absolute_url(item.get("itemUrl")),
             "image": _absolute_url(item.get("image")),
         })
@@ -182,7 +202,8 @@ def _get_ebay_token():
         )
         response.raise_for_status()
         body = response.json()
-    except (requests.RequestException, ValueError):
+    except (requests.RequestException, ValueError) as exc:
+        logger.warning("eBay token fetch failed: %s", exc)
         return None
 
     token = body.get("access_token")
@@ -211,7 +232,8 @@ def fetch_from_ebay(query):
         )
         response.raise_for_status()
         items = response.json().get("itemSummaries", [])
-    except (requests.RequestException, ValueError):
+    except (requests.RequestException, ValueError) as exc:
+        logger.warning("eBay search failed for %r: %s", query, exc)
         return []
 
     listings = []
@@ -220,7 +242,7 @@ def fetch_from_ebay(query):
             break
         price_usd = _parse_float((item.get("price") or {}).get("value"))
         title = item.get("title", query)
-        if price_usd is None or not _is_relevant(query, title):
+        if price_usd is None or price_usd <= 0 or not _is_relevant(query, title):
             continue
         seller = item.get("seller") or {}
         # eBay's Browse API has no star rating; feedbackPercentage (0-100) is
@@ -232,7 +254,7 @@ def fetch_from_ebay(query):
             "price": _to_kes(price_usd),
             "rating": round(feedback_pct / 20, 1) if feedback_pct is not None else 0.0,
             "num_ratings": int(seller.get("feedbackScore") or 0),
-            "pay_on_delivery": False,
+            "pay_on_delivery": Config.PAY_ON_DELIVERY_DEFAULTS.get("eBay", False),
             "url": item.get("itemWebUrl"),
             "image": (item.get("image") or {}).get("imageUrl"),
         })
@@ -246,17 +268,62 @@ FETCHERS = {
 }
 
 
+def _fetch_site(site, fetcher, query):
+    """Run a single site fetcher, never letting it fail the whole search."""
+    try:
+        return fetcher(query)
+    except Exception as exc:  # keep the per-site try/except
+        logger.exception("%s fetcher raised for %r: %s", site, query, exc)
+        return []
+
+
+def clear_cache():
+    """Clear the in-memory search-result cache (mainly for tests)."""
+    search_cache.clear()
+
+
 def fetch_all(query):
     """Query every configured site and return whatever listings came back.
 
-    A site with no credentials configured, or whose request failed, simply
-    contributes no listings rather than failing the whole search.
+    The three site fetchers run concurrently (max 3 workers) with an overall
+    timeout of 15 seconds; unfinished or failed sites contribute no listings.
+    Results are keyed on query.strip().lower(); only non-empty results are
+    cached.
+
+    Returns a tuple of (listings, site_counts) where site_counts maps each
+    site name to the number of listings it contributed. A site with no
+    credentials configured, or whose request failed, simply contributes no
+    listings rather than failing the whole search.
     """
+    key = query.strip().lower()
+    cached = search_cache.get(key)
+    if cached is not None:
+        return cached["listings"], cached["site_counts"]
+
     listings = []
-    for fetcher in FETCHERS.values():
-        try:
-            site_listings = fetcher(query)
-        except Exception:
-            site_listings = []
-        listings.extend(site_listings or [])
-    return listings
+    site_counts = {}
+    with ThreadPoolExecutor(max_workers=FETCH_ALL_WORKERS) as pool:
+        futures = {
+            pool.submit(_fetch_site, site, fetcher, query): site
+            for site, fetcher in FETCHERS.items()
+        }
+        done, not_done = wait(futures, timeout=FETCH_ALL_TIMEOUT)
+        for future in not_done:
+            site = futures[future]
+            future.cancel()
+            site_counts[site] = 0
+            logger.info("%s fetcher timed out for %r", site, query)
+        for future in done:
+            site = futures[future]
+            try:
+                site_listings = future.result()
+            except Exception as exc:  # keep the per-site try/except
+                logger.exception("%s fetcher raised for %r: %s", site, query, exc)
+                site_listings = []
+            site_counts[site] = len(site_listings or [])
+            logger.info("%s returned %d listings for %r", site, site_counts[site], query)
+            listings.extend(site_listings or [])
+
+    if listings:
+        search_cache.set(key, {"listings": listings, "site_counts": site_counts})
+    return listings, site_counts
