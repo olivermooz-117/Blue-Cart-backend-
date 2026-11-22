@@ -44,3 +44,64 @@ def test_search_empty_results(client):
     assert response.status_code == 200
     assert data["results"] == []
     assert data["sites"] == []
+
+
+def test_crawler_caches_non_empty_results_only(monkeypatch):
+    import services.crawler as crawler
+
+    crawler.clear_cache()
+    monkeypatch.setenv("RAPIDAPI_AMAZON_KEY", "test-key")
+    monkeypatch.setattr(crawler.Config, "RAPIDAPI_AMAZON_KEY", "test-key")
+
+    class FakeResponse:
+        def __init__(self, products):
+            self._products = products
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"data": {"products": self._products}}
+
+    products = [{
+        "product_price": "10",
+        "product_title": "phone xyz",
+        "product_star_rating": "4.5",
+        "product_num_ratings": "100",
+        "product_url": "https://example.com/p",
+        "product_photo": "https://example.com/i.jpg",
+    }]
+    empty_products = []
+
+    calls = []
+
+    def fake_get(url, params=None, headers=None, timeout=None):
+        calls.append(url)
+        return FakeResponse(products)
+
+    monkeypatch.setattr(crawler.requests, "get", fake_get)
+
+    listings, counts = crawler.fetch_all("phone")
+    assert len(listings) == 1
+    assert listings[0]["site"] == "Amazon"
+    assert counts == {"Amazon": 1, "AliExpress": 0, "eBay": 0}
+    assert len(calls) == 1
+
+    # Repeated query is served from cache: no upstream request.
+    listings_again, counts_again = crawler.fetch_all("phone")
+    assert listings_again == listings
+    assert len(calls) == 1
+
+    # A different query hits the upstream API again.
+    crawler.fetch_all("tablet")
+    assert len(calls) == 2
+
+    # Empty results are not cached.
+    def empty_get(*a, **k):
+        calls.append(a[0] if a else "url")
+        return FakeResponse(empty_products)
+    monkeypatch.setattr(crawler.requests, "get", empty_get)
+    assert crawler.fetch_all("nothing") == ([], {"Amazon": 0, "AliExpress": 0, "eBay": 0})
+    assert crawler.fetch_all("nothing") == ([], {"Amazon": 0, "AliExpress": 0, "eBay": 0})
+    assert len(calls) == 4
+    crawler.clear_cache()

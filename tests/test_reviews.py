@@ -158,3 +158,87 @@ def test_reviews_create_invalid_rating_non_numeric(client):
     })
     assert response.status_code == 400
     assert "error" in response.get_json()
+
+
+def test_reviews_create_rating_bool(client):
+    response = client.post("/api/search/reviews", json={
+        "query": "headphones",
+        "shop": "Amazon",
+        "author": "Alice",
+        "comment": "Nice",
+        "rating": True,
+    })
+    assert response.status_code == 400
+
+
+def test_reviews_create_rating_float(client):
+    response = client.post("/api/search/reviews", json={
+        "query": "headphones",
+        "shop": "Amazon",
+        "author": "Alice",
+        "comment": "Nice",
+        "rating": 4.5,
+    })
+    assert response.status_code == 400
+
+
+def test_reviews_create_shop_too_long(client):
+    response = client.post("/api/search/reviews", json={
+        "query": "headphones",
+        "shop": "s" * 51,
+        "author": "Alice",
+        "comment": "Nice",
+        "rating": 4,
+    })
+    assert response.status_code == 400
+
+
+def test_reviews_create_comment_too_long(client):
+    response = client.post("/api/search/reviews", json={
+        "query": "headphones",
+        "shop": "Amazon",
+        "author": "Alice",
+        "comment": "x" * 1001,
+        "rating": 4,
+    })
+    assert response.status_code == 400
+
+
+def test_reviews_create_author_too_long_guest(client):
+    response = client.post("/api/search/reviews", json={
+        "query": "headphones",
+        "shop": "Amazon",
+        "author": "a" * 51,
+        "comment": "Nice",
+        "rating": 4,
+    })
+    assert response.status_code == 400
+
+
+def test_reviews_get_matches_query_case_insensitively(client):
+    client.post("/api/search/reviews", json={
+        "query": "Headphones",
+        "shop": "Amazon",
+        "author": "Alice",
+        "comment": "Great!",
+        "rating": 5,
+    })
+    response = client.get("/api/search/reviews?q=headphones")
+    data = response.get_json()
+    assert response.status_code == 200
+    assert len(data["reviews"]) == 1
+    assert data["reviews"][0]["query"] == "Headphones"
+
+
+def test_reviews_guest_can_override_author(client):
+    # Guests send their own author; it is stored as submitted.
+    response = client.post("/api/search/reviews", json={
+        "query": "headphones",
+        "shop": "Amazon",
+        "author": "Guest User",
+        "comment": "Nice",
+        "rating": 4,
+    })
+    data = response.get_json()
+    assert response.status_code == 201
+    assert data["author"] == "Guest User"
