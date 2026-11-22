@@ -45,6 +45,37 @@ def test_filter_listings_not_a_list(client):
     assert "error" in response.get_json()
 
 
+def test_filter_rejects_non_object_listing(client):
+    response = _post_filter(client, {"listings": [None]})
+    assert response.status_code == 400
+    assert "error" in response.get_json()
+
+
+def test_filter_rejects_non_object_weights(client):
+    response = _post_filter(client, {"listings": [VALID_LISTING], "weights": []})
+    assert response.status_code == 400
+    assert "error" in response.get_json()
+
+
+def test_filter_rejects_malformed_json(client):
+    response = client.post(
+        "/api/search/filter",
+        data='{"listings":',
+        content_type="application/json",
+    )
+    assert response.status_code == 400
+    assert "error" in response.get_json()
+
+
+def test_filter_rejects_negative_num_ratings(client):
+    response = _post_filter(
+        client,
+        {"listings": [{**VALID_LISTING, "num_ratings": -1}]},
+    )
+    assert response.status_code == 400
+    assert "error" in response.get_json()
+
+
 def test_filter_more_than_100_listings(client):
     response = _post_filter(
         client,

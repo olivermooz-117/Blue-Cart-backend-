@@ -1,10 +1,93 @@
 from unittest.mock import patch
 
+from app import create_app
+from services import cache
+
 
 def test_search_requires_query(client):
     response = client.get("/api/search")
     assert response.status_code == 400
     assert "error" in response.get_json()
+
+
+def test_search_rejects_oversized_query(client):
+    response = client.get("/api/search", query_string={"q": "x" * 256})
+    assert response.status_code == 400
+    assert "error" in response.get_json()
+
+
+def test_search_preflight_allows_local_frontend(client):
+    response = client.options(
+        "/api/search",
+        headers={
+            "Origin": "http://localhost:5173",
+            "Access-Control-Request-Method": "GET",
+            "Access-Control-Request-Headers": "authorization",
+        },
+    )
+    assert response.status_code == 200
+    assert response.headers["Access-Control-Allow-Origin"] == "http://localhost:5173"
+    assert "GET" in response.headers["Access-Control-Allow-Methods"]
+    assert "authorization" in response.headers["Access-Control-Allow-Headers"].lower()
+
+
+def test_cors_uses_app_config_override():
+    app = create_app({
+        "TESTING": True,
+        "SQLALCHEMY_DATABASE_URI": "sqlite:///:memory:",
+        "CORS_ORIGINS": "https://shop.example",
+    })
+    response = app.test_client().get(
+        "/api/health", headers={"Origin": "https://shop.example"}
+    )
+    assert response.headers["Access-Control-Allow-Origin"] == "https://shop.example"
+
+
+def test_search_cache_uses_configured_ttl(monkeypatch):
+    app = create_app({
+        "TESTING": True,
+        "SQLALCHEMY_DATABASE_URI": "sqlite:///:memory:",
+        "SEARCH_CACHE_TTL_SECONDS": 5,
+        "REDIS_URL": "",
+    })
+    now = [100.0]
+    monkeypatch.setattr(cache.time, "time", lambda: now[0])
+    cache.cache_clear()
+
+    with app.app_context():
+        cache.cache_set("ttl-test", {"listings": []})
+        assert cache.cache_get("ttl-test") == {"listings": []}
+        now[0] += 6
+        assert cache.cache_get("ttl-test") is None
+
+
+def test_search_cache_falls_back_when_redis_is_unavailable(monkeypatch):
+    import redis
+
+    cache_instance = cache.SearchCache()
+
+    class UnavailableRedis:
+        def get(self, key):
+            raise redis.exceptions.ConnectionError("unavailable")
+
+        def setex(self, key, ttl, value):
+            raise redis.exceptions.ConnectionError("unavailable")
+
+    monkeypatch.setattr(
+        cache_instance,
+        "_redis_client",
+        lambda redis_url: (UnavailableRedis(), redis),
+    )
+    app = create_app({
+        "TESTING": True,
+        "SQLALCHEMY_DATABASE_URI": "sqlite:///:memory:",
+        "SEARCH_CACHE_TTL_SECONDS": 5,
+        "REDIS_URL": "redis://unavailable",
+    })
+
+    with app.app_context():
+        cache_instance.set("fallback", {"listings": []})
+        assert cache_instance.get("fallback") == {"listings": []}
 
 
 def test_search_returns_structure(client):
@@ -50,6 +133,7 @@ def test_crawler_caches_non_empty_results_only(monkeypatch):
     import services.crawler as crawler
 
     crawler.clear_cache()
+    monkeypatch.setattr(crawler.Config, "REDIS_URL", "")
     monkeypatch.setenv("RAPIDAPI_AMAZON_KEY", "test-key")
     monkeypatch.setattr(crawler.Config, "RAPIDAPI_AMAZON_KEY", "test-key")
 

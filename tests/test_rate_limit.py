@@ -1,3 +1,5 @@
+from unittest.mock import patch
+
 from app import create_app
 from extensions import db
 
@@ -25,5 +27,26 @@ def test_login_rate_limit_returns_429_json():
         "email": "nobody@example.com",
         "password": "wrong",
     })
+    assert response.status_code == 429
+    assert response.get_json() == {"error": "Too Many Requests"}
+
+
+def test_search_rate_limit_uses_app_configuration():
+    app = create_app({
+        "TESTING": False,
+        "SQLALCHEMY_DATABASE_URI": "sqlite:///:memory:",
+        "JWT_SECRET_KEY": "test-jwt-secret",
+        "SECRET_KEY": "test-secret",
+        "RATE_LIMIT_REQUESTS": 2,
+        "RATE_LIMIT_WINDOW_SECONDS": 60,
+    })
+    with app.app_context():
+        db.create_all()
+    client = app.test_client()
+
+    with patch("services.crawler.fetch_all", return_value=([], {})):
+        assert client.get("/api/search?q=phone").status_code == 200
+        assert client.get("/api/search?q=phone").status_code == 200
+        response = client.get("/api/search?q=phone")
     assert response.status_code == 429
     assert response.get_json() == {"error": "Too Many Requests"}

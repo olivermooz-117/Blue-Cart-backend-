@@ -1,26 +1,31 @@
 from math import isfinite
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, current_app, jsonify, request
 from flask_jwt_extended import get_jwt_identity
 
 from extensions import db, limiter
-from models import SearchHistory
+from models import SearchHistory, User
 from services import crawler, mb_cb
 from validation import ApiError, get_json_object
 
 search_bp = Blueprint("search", __name__, url_prefix="/api/search")
 
 
-def _client_ip():
-    return request.headers.get("X-Forwarded-For", request.remote_addr or "")
+def _search_rate_limit():
+    return (
+        f"{current_app.config['RATE_LIMIT_REQUESTS']} per "
+        f"{current_app.config['RATE_LIMIT_WINDOW_SECONDS']} seconds"
+    )
 
 
 @search_bp.route("", methods=["GET"])
-@limiter.limit("30/minute")
+@limiter.limit(_search_rate_limit)
 def search():
     query = request.args.get("q", "").strip()
     if not query:
         raise ApiError("Query parameter 'q' is required", 400)
+    if len(query) > 255:
+        raise ApiError("Query parameter 'q' must be at most 255 characters", 400)
 
     listings, _site_counts = crawler.fetch_all(query)
     ranked = mb_cb.rank_listings(listings)
@@ -124,6 +129,19 @@ def _optional_user_id():
 
         verify_jwt_in_request(optional=True)
         identity = get_jwt_identity()
-        return int(identity) if identity is not None else None
-    except (JWTExtendedException, jwt.exceptions.PyJWTError, ValueError):
+        if (
+            isinstance(identity, bool)
+            or not isinstance(identity, (str, int))
+        ):
+            return None
+        user_id = int(identity)
+        if not 0 < user_id <= 2_147_483_647:
+            return None
+    except (
+        JWTExtendedException,
+        jwt.exceptions.PyJWTError,
+        TypeError,
+        ValueError,
+    ):
         return None
+    return user_id if db.session.get(User, user_id) is not None else None

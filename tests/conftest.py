@@ -15,6 +15,7 @@ def app():
         "SQLALCHEMY_DATABASE_URI": "sqlite:///:memory:",
         "JWT_SECRET_KEY": "test-jwt-secret",
         "SECRET_KEY": "test-secret",
+        "REDIS_URL": "",
     })
 
     with app.app_context():

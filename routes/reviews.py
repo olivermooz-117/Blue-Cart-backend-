@@ -20,10 +20,20 @@ def _current_user():
 
         verify_jwt_in_request(optional=True)
         identity = get_jwt_identity()
-        user_id = int(identity) if identity is not None else None
-    except (JWTExtendedException, jwt.exceptions.PyJWTError, ValueError):
-        return None, None
-    if user_id is None:
+        if (
+            isinstance(identity, bool)
+            or not isinstance(identity, (str, int))
+        ):
+            return None, None
+        user_id = int(identity)
+        if not 0 < user_id <= 2_147_483_647:
+            return None, None
+    except (
+        JWTExtendedException,
+        jwt.exceptions.PyJWTError,
+        TypeError,
+        ValueError,
+    ):
         return None, None
     user = db.session.get(User, user_id)
     if user is None:
@@ -37,6 +47,9 @@ def get_reviews():
     query = request.args.get("q")
     if not query or not query.strip():
         raise ApiError("Query parameter 'q' is required", 400)
+    query = query.strip()
+    if len(query) > 255:
+        raise ApiError("Query parameter 'q' must be at most 255 characters", 400)
 
     try:
         limit = int(request.args.get("limit", 50))
@@ -50,7 +63,7 @@ def get_reviews():
     offset = max(0, offset)
 
     reviews = (
-        Review.query.filter_by(query_key=query.strip().lower())
+        Review.query.filter_by(query_key=query.lower())
         .order_by(Review.created_at.desc(), Review.id.desc())
         .offset(offset)
         .limit(limit)

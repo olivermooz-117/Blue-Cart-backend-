@@ -14,6 +14,27 @@ def test_reviews_get_requires_query(client):
     assert "error" in response.get_json()
 
 
+def test_reviews_reject_oversized_query(client):
+    response = client.get("/api/search/reviews", query_string={"q": "x" * 256})
+    assert response.status_code == 400
+    assert "error" in response.get_json()
+
+
+def test_reviews_preflight_allows_local_frontend(client):
+    response = client.options(
+        "/api/search/reviews",
+        headers={
+            "Origin": "http://localhost:5173",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "content-type",
+        },
+    )
+    assert response.status_code == 200
+    assert response.headers["Access-Control-Allow-Origin"] == "http://localhost:5173"
+    assert "POST" in response.headers["Access-Control-Allow-Methods"]
+    assert "content-type" in response.headers["Access-Control-Allow-Headers"].lower()
+
+
 def test_reviews_create_success(client):
     response = client.post("/api/search/reviews", json={
         "query": "headphones",
