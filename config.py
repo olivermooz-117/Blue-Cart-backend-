@@ -57,12 +57,18 @@ class Config:
     # Search-result cache TTL (seconds), within the 10-15 minute window.
     SEARCH_CACHE_TTL_SECONDS = int(os.environ.get("SEARCH_CACHE_TTL_SECONDS", "720"))
 
+    # Timeout for an individual marketplace HTTP request. The crawler also
+    # applies an overall timeout while collecting the concurrent site results.
+    MARKETPLACE_TIMEOUT_SECONDS = int(
+        os.environ.get("MARKETPLACE_TIMEOUT_SECONDS", "10")
+    )
+
     # Per-IP rate limiting on the search endpoint.
     RATE_LIMIT_REQUESTS = int(os.environ.get("RATE_LIMIT_REQUESTS", "30"))
     RATE_LIMIT_WINDOW_SECONDS = int(os.environ.get("RATE_LIMIT_WINDOW_SECONDS", "60"))
 
     # Rate limiter storage backend (memory:// by default).
-    RATELIMIT_STORAGE_URI = os.environ.get("RATELIMIT_STORAGE_URI", "memory://")
+    RATELIMIT_STORAGE_URI = os.environ.get("RATELIMIT_STORAGE_URI") or "memory://"
 
     # JWT access token lifetime (seconds from env, default 24 hours).
     JWT_ACCESS_TOKEN_EXPIRES = timedelta(

@@ -56,3 +56,91 @@ def test_expired_token_on_search_is_guest(client, app):
     assert response.status_code == 200
     assert response.get_json()["history"] == []
     assert response.get_json()["total"] == 0
+
+
+def test_malformed_token_on_search_is_guest(client):
+    with patch("services.crawler.fetch_all", return_value=([], {})):
+        response = client.get(
+            "/api/search?q=phone",
+            headers={"Authorization": "Bearer not-a-valid-token"},
+        )
+    assert response.status_code == 200
+    assert response.get_json()["query"] == "phone"
+
+
+def test_deleted_user_token_on_search_is_guest(client, app):
+    with app.app_context():
+        token = create_access_token(identity="999999")
+
+    with patch("services.crawler.fetch_all", return_value=([], {})):
+        response = client.get(
+            "/api/search?q=phone",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    assert response.status_code == 200
+    assert response.get_json()["query"] == "phone"
+
+
+def test_malformed_identity_token_on_search_is_guest(client, app):
+    with app.app_context():
+        token = create_access_token(identity={"id": 1})
+
+    with patch("services.crawler.fetch_all", return_value=([], {})):
+        response = client.get(
+            "/api/search?q=phone",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    assert response.status_code == 200
+    assert response.get_json()["query"] == "phone"
+
+
+def test_malformed_token_on_review_is_guest(client):
+    response = client.post(
+        "/api/search/reviews",
+        json={
+            "query": "phone",
+            "shop": "Amazon",
+            "author": "Guest",
+            "comment": "Review",
+            "rating": 4,
+        },
+        headers={"Authorization": "Bearer not-a-valid-token"},
+    )
+    assert response.status_code == 201
+    assert response.get_json()["author"] == "Guest"
+
+
+def test_expired_token_on_review_is_guest(client, app):
+    token = _expired_token(app)
+    response = client.post(
+        "/api/search/reviews",
+        json={
+            "query": "phone",
+            "shop": "Amazon",
+            "author": "Guest",
+            "comment": "Review",
+            "rating": 4,
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 201
+    assert response.get_json()["author"] == "Guest"
+
+
+def test_deleted_user_token_on_review_is_guest(client, app):
+    with app.app_context():
+        token = create_access_token(identity="999999")
+
+    response = client.post(
+        "/api/search/reviews",
+        json={
+            "query": "phone",
+            "shop": "Amazon",
+            "author": "Guest",
+            "comment": "Review",
+            "rating": 4,
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 201
+    assert response.get_json()["author"] == "Guest"

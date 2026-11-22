@@ -31,8 +31,12 @@ def create_app(config_overrides=None):
     app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1)
 
     allowed_origins = [
-        origin.strip() for origin in Config.CORS_ORIGINS.split(",") if origin.strip()
+        origin.strip()
+        for origin in app.config.get("CORS_ORIGINS", "").split(",")
+        if origin.strip()
     ]
+    if "http://localhost:5173" not in allowed_origins:
+        allowed_origins.append("http://localhost:5173")
     CORS(
         app,
         resources={
