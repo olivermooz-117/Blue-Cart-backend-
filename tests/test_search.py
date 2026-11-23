@@ -189,3 +189,115 @@ def test_crawler_caches_non_empty_results_only(monkeypatch):
     assert crawler.fetch_all("nothing") == ([], {"Amazon": 0, "AliExpress": 0, "eBay": 0})
     assert len(calls) == 4
     crawler.clear_cache()
+
+
+def _listing(site, price=100):
+    return {
+        "site": site,
+        "title": f"{site} item",
+        "price": price,
+        "rating": 4.0,
+        "num_ratings": 0,
+        "pay_on_delivery": False,
+    }
+
+
+def test_fetch_all_returns_fast_site_when_slow_site_times_out(monkeypatch):
+    import time
+
+    import services.crawler as crawler
+
+    crawler.clear_cache()
+    monkeypatch.setattr(crawler, "FETCH_ALL_TIMEOUT", 0.5)
+
+    fast_calls = 0
+    slow_calls = 0
+
+    def fast(query):
+        nonlocal fast_calls
+        fast_calls += 1
+        return [_listing("Fast")]
+
+    def slow(query):
+        nonlocal slow_calls
+        slow_calls += 1
+        time.sleep(2)
+        return [_listing("Slow")]
+
+    monkeypatch.setattr(crawler, "FETCHERS", {"Fast": fast, "Slow": slow})
+
+    start = time.time()
+    listings, counts = crawler.fetch_all("q")
+    elapsed = time.time() - start
+
+    assert elapsed < 1.5
+    assert len(listings) == 1
+    assert listings[0]["site"] == "Fast"
+    assert counts == {"Fast": 1, "Slow": 0}
+
+    # Not cached: second call re-invokes the fetchers.
+    before = (fast_calls, slow_calls)
+    crawler.fetch_all("q")
+    assert (fast_calls, slow_calls) != before
+    crawler.clear_cache()
+
+
+def test_fetch_all_all_finish_in_time_are_cached(monkeypatch):
+    import services.crawler as crawler
+
+    crawler.clear_cache()
+    monkeypatch.setattr(crawler, "FETCH_ALL_TIMEOUT", 0.5)
+
+    calls = 0
+
+    def fetcher(query):
+        nonlocal calls
+        calls += 1
+        return [_listing("S")]
+
+    monkeypatch.setattr(crawler, "FETCHERS", {"S": fetcher})
+
+    listings, counts = crawler.fetch_all("q")
+    assert len(listings) == 1
+    assert counts == {"S": 1}
+
+    # Cached: second call does not invoke the fetcher again.
+    calls_before = calls
+    listings_again, counts_again = crawler.fetch_all("q")
+    assert listings_again == listings
+    assert counts_again == counts
+    assert calls == calls_before
+    crawler.clear_cache()
+
+
+def test_fetch_all_raiser_prevents_caching(monkeypatch):
+    import services.crawler as crawler
+
+    crawler.clear_cache()
+    monkeypatch.setattr(crawler, "FETCH_ALL_TIMEOUT", 0.5)
+
+    raiser_calls = 0
+    ok_calls = 0
+
+    def raiser(query):
+        nonlocal raiser_calls
+        raiser_calls += 1
+        raise RuntimeError("boom")
+
+    def ok(query):
+        nonlocal ok_calls
+        ok_calls += 1
+        return [_listing("OK")]
+
+    monkeypatch.setattr(crawler, "FETCHERS", {"Raiser": raiser, "OK": ok})
+
+    listings, counts = crawler.fetch_all("q")
+    assert len(listings) == 1
+    assert listings[0]["site"] == "OK"
+    assert counts == {"Raiser": 0, "OK": 1}
+
+    # Not cached because Raiser raised: second call re-invokes the fetchers.
+    before = (raiser_calls, ok_calls)
+    crawler.fetch_all("q")
+    assert (raiser_calls, ok_calls) != before
+    crawler.clear_cache()
