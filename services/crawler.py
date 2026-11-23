@@ -33,7 +33,7 @@ SITES = ["Amazon", "AliExpress", "eBay"]
 REQUEST_TIMEOUT = Config.MARKETPLACE_TIMEOUT_SECONDS
 MAX_LISTINGS_PER_SITE = 6
 
-FETCH_ALL_TIMEOUT = 15
+FETCH_ALL_TIMEOUT = 25
 FETCH_ALL_WORKERS = 3
 
 logger = logging.getLogger(__name__)
@@ -304,11 +304,12 @@ FETCHERS = {
 }
 
 
-def _fetch_site(site, fetcher, query):
+def _fetch_site(site, fetcher, query, failed):
     """Run a single site fetcher, never letting it fail the whole search."""
     try:
         return fetcher(query)
     except Exception as exc:  # keep the per-site try/except
+        failed.add(site)
         logger.exception("%s fetcher raised for %r: %s", site, query, exc)
         return []
 
@@ -322,14 +323,18 @@ def fetch_all(query):
     """Query every configured site and return whatever listings came back.
 
     The three site fetchers run concurrently (max 3 workers) with an overall
-    timeout of 15 seconds; unfinished or failed sites contribute no listings.
-    Results are keyed on query.strip().lower(); only non-empty results are
-    cached.
+    timeout of FETCH_ALL_TIMEOUT seconds. The pool is shut down with
+    ``wait=False`` so the request returns at the cap even if a site is still
+    running; unfinished or failed sites contribute no listings.
+
+    Results are keyed on query.strip().lower(); they are cached only when the
+    result is non-empty AND every configured site finished before the timeout
+    without raising (a site that is not configured or legitimately returned []
+    still counts as finished). If any site timed out or raised, the partial
+    result is returned but NOT cached.
 
     Returns a tuple of (listings, site_counts) where site_counts maps each
-    site name to the number of listings it contributed. A site with no
-    credentials configured, or whose request failed, simply contributes no
-    listings rather than failing the whole search.
+    site name to the number of listings it contributed.
     """
     key = query.strip().lower()
     cached = cache_get(key)
@@ -338,13 +343,17 @@ def fetch_all(query):
 
     listings = []
     site_counts = {}
+    failed = set()
     pool = ThreadPoolExecutor(max_workers=FETCH_ALL_WORKERS)
     try:
         futures = {
-            pool.submit(_fetch_site, site, fetcher, query): site
+            pool.submit(_fetch_site, site, fetcher, query, failed): site
             for site, fetcher in FETCHERS.items()
         }
         done, not_done = wait(futures, timeout=FETCH_ALL_TIMEOUT)
+        # All sites finished cleanly only when nothing timed out and no site
+        # raised an exception.
+        all_ok = not not_done and not failed
         for future in not_done:
             site = futures[future]
             future.cancel()
@@ -355,6 +364,7 @@ def fetch_all(query):
             try:
                 site_listings = future.result()
             except Exception as exc:  # keep the per-site try/except
+                failed.add(site)
                 logger.exception("%s fetcher raised for %r: %s", site, query, exc)
                 site_listings = []
             site_counts[site] = len(site_listings or [])
@@ -363,6 +373,8 @@ def fetch_all(query):
     finally:
         pool.shutdown(wait=False, cancel_futures=True)
 
-    if listings:
+    # Only cache complete, non-empty results. A partial result (slow or
+    # erroring site) must not be cached for 10 minutes.
+    if all_ok and listings:
         cache_set(key, {"listings": listings, "site_counts": site_counts})
     return listings, site_counts
